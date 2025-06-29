@@ -1,0 +1,125 @@
+#!/bin/bash
+
+set -e
+
+show_help() {
+  echo ""
+  echo "📝 Usage: $0 input.pdf output.pdf [--quality N] [--resize PERCENT]"
+  echo ""
+  echo "Positional Arguments:"
+  echo "  input.pdf         Path to the original scanned PDF file"
+  echo "  output.pdf        Path where the compressed PDF will be saved"
+  echo ""
+  echo "Optional Flags:"
+  echo "  --quality N       JPEG quality (1–100), default: 40"
+  echo "  --resize PERCENT  Resize images, e.g. 50 = scale to 50%, default: 100"
+  echo ""
+  echo "Examples:"
+  echo "  $0 myscan.pdf smaller.pdf"
+  echo "  $0 myscan.pdf smaller.pdf --quality 30"
+  echo "  $0 myscan.pdf smaller.pdf --quality 35 --resize 50"
+  echo ""
+  echo "📌 Tips for --quality:"
+  echo "  60–80  ➤ High quality, larger file size"
+  echo "  40–60  ➤ Balanced quality and compression (recommended)"
+  echo "  20–40  ➤ Smaller, still readable for text"
+  echo "  10–20  ➤ Very small, may affect readability"
+  echo ""
+  echo "📏 Tips for --resize:"
+  echo "  100    ➤ Original size (default)"
+  echo "   50    ➤ Shrinks each page to half"
+  echo "   75    ➤ Reduces size by 25%"
+  echo ""
+  echo "Dependencies: pdfimages, mogrify, img2pdf (install via Homebrew)"
+  echo ""
+  exit 0
+}
+
+check_tool() {
+  if ! command -v "$1" &> /dev/null; then
+    echo "❌ Missing tool: $1"
+    read -p "   ➤ Do you want to install $1 with Homebrew? [y/N] " reply
+    if [[ "$reply" =~ ^[Yy]$ ]]; then
+      brew install "$2"
+    else
+      echo "Aborting. Please install $1 manually."
+      exit 1
+    fi
+  fi
+}
+
+# Parse args
+if [[ "$1" == "--help" || "$1" == "-h" || $# -lt 2 ]]; then
+  show_help
+fi
+
+INPUT_PDF="$1"
+OUTPUT_PDF="$2"
+shift 2
+
+JPEG_QUALITY=40
+RESIZE_PERCENT=100
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --quality)
+      JPEG_QUALITY="$2"
+      shift 2
+      ;;
+    --resize)
+      RESIZE_PERCENT="$2"
+      shift 2
+      ;;
+    *)
+      echo "❌ Unknown option: $1"
+      show_help
+      ;;
+  esac
+done
+
+# Validate input values
+if ! [[ "$JPEG_QUALITY" =~ ^[0-9]+$ ]] || (( JPEG_QUALITY < 1 || JPEG_QUALITY > 100 )); then
+  echo "❌ --quality must be an integer between 1 and 100"
+  exit 1
+fi
+
+if ! [[ "$RESIZE_PERCENT" =~ ^[0-9]+$ ]] || (( RESIZE_PERCENT < 10 || RESIZE_PERCENT > 500 )); then
+  echo "❌ --resize must be an integer between 10 and 500"
+  exit 1
+fi
+
+if [[ ! -f "$INPUT_PDF" ]]; then
+  echo "❌ Input file not found: $INPUT_PDF"
+  exit 1
+fi
+
+# Check dependencies
+check_tool "pdfimages" "poppler"
+check_tool "mogrify" "imagemagick"
+check_tool "img2pdf" "img2pdf"
+
+# Temporary working directory
+WORKDIR="$(mktemp -d)"
+echo "📂 Working in: $WORKDIR"
+cd "$WORKDIR"
+
+echo "📥 Extracting JPEG images from: $INPUT_PDF ..."
+pdfimages -j "$OLDPWD/$INPUT_PDF" page
+
+echo "🎛️ Recompressing images to JPEG quality: $JPEG_QUALITY ..."
+mogrify -quality "$JPEG_QUALITY" *.jpg
+
+if [[ "$RESIZE_PERCENT" -ne 100 ]]; then
+  echo "📏 Resizing images to: ${RESIZE_PERCENT}% ..."
+  mogrify -resize "${RESIZE_PERCENT}%" *.jpg
+else
+  echo "📏 Skipping resize (100%)"
+fi
+
+echo "📦 Rebuilding compressed PDF: $OUTPUT_PDF ..."
+img2pdf *.jpg -o "$OLDPWD/$OUTPUT_PDF"
+
+echo "✅ Done! Compressed PDF saved to: $OUTPUT_PDF"
+
+# Uncomment to clean up:
+# rm -r "$WORKDIR"
